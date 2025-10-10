@@ -26,6 +26,8 @@ def fused_recurrent_delta_rule_fwd_kernel(
     o,
     h0,
     ht,
+    scale_0,
+    scale_t,
     cu_seqlens,
     scale,
     T,
@@ -68,20 +70,27 @@ def fused_recurrent_delta_rule_fwd_kernel(
     if USE_INITIAL_STATE:
         p_h0 = h0 + i_nh * K * V + (i_k * BK + tl.arange(0, BK)[None, :]) * V + (i_v * BV + tl.arange(0, BV)[:, None])
         b_h += tl.load(p_h0, mask=mask_h, other=0).to(tl.float32)
-
+    
+    # p_scale = scale_0 + i_nh * K * V + (i_k * BK + tl.arange(0, BK)[None, :]) * V + (i_v * BV + tl.arange(0, BV)[:, None])
+    # b_scale = tl.load(p_scale, mask=mask_h, other=0).to(tl.float32)
+    
+    p_scale = scale_0 + (bos * H + i_h) * K + i_k * BK + tl.arange(0, BK)
+    b_scale = tl.zeros([BK], dtype=tl.float32)
+    b_scale += tl.load(p_scale, mask=mask_k, other=0).to(tl.float32)
     for _ in range(0, T):
         b_k = tl.load(p_k, mask=mask_k, other=0).to(tl.float32)
         b_v = tl.load(p_v, mask=mask_v, other=0).to(tl.float32)
         b_q = tl.load(p_q, mask=mask_k, other=0).to(tl.float32) * scale
         b_v_minus = tl.sum(b_h * b_k[None, :], axis=1)
         b_v -= b_v_minus
+        b_scale += b_k * b_k
         if IS_BETA_HEADWISE:
             b_beta = tl.load(p_beta, mask=mask_v, other=0).to(tl.float32)
         else:
             b_beta = tl.load(p_beta).to(tl.float32)
         tl.store(p_u, b_v.to(p_v.dtype.element_ty), mask=mask_v)
         b_v *= b_beta
-        b_h += b_k[None, :] * b_v[:, None]
+        b_h += b_k[None, :] * b_v[:, None] / (b_scale[:, None] + 1e-5)
         b_o = b_h * b_q[None, :]
         b_o = tl.sum(b_o, axis=1)
         tl.store(p_o, b_o.to(p_o.dtype.element_ty), mask=mask_v)
@@ -96,6 +105,8 @@ def fused_recurrent_delta_rule_fwd_kernel(
     if STORE_FINAL_STATE:
         p_ht = ht + i_nh * K * V + (i_k * BK + tl.arange(0, BK)[None, :]) * V + (i_v * BV + tl.arange(0, BV)[:, None])
         tl.store(p_ht, b_h.to(p_ht.dtype.element_ty), mask=mask_h)
+        p_scale_t = scale_t + (bos * H + i_h) * K + i_k * BK + tl.arange(0, BK)
+        tl.store(p_scale_t, b_scale.to(p_scale_t.dtype.element_ty), mask=mask_k)
 
 
 @triton.heuristics({
@@ -521,6 +532,7 @@ def fused_recurrent_delta_rule(
         assert scale > 0, "scale must be positive"
     if beta is None:
         beta = torch.ones_like(q[..., 0])
+    print("Beta", beta)
     o, final_state = FusedRecurrentFunction.apply(
         q,
         k,
