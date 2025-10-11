@@ -269,6 +269,7 @@ def fused_recurrent_delta_rule_fwd(
     beta: torch.Tensor,
     scale: float,
     initial_state: torch.Tensor,
+    initial_scale: torch.Tensor,
     output_final_state: bool,
     cu_seqlens: Optional[torch.LongTensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -283,8 +284,10 @@ def fused_recurrent_delta_rule_fwd(
     o = q.new_empty(NK, *v.shape)
     if output_final_state:
         final_state = q.new_empty(N, H, K, V, dtype=torch.float32)
+        final_scale = q.new_empty(N, H, K, dtype=torch.float32)
     else:
         final_state = None
+        final_scale = None
 
     grid = (NV, NK, N * H)
     u = torch.empty_like(v)
@@ -297,6 +300,8 @@ def fused_recurrent_delta_rule_fwd(
         o,
         initial_state,
         final_state,
+        initial_scale,
+        final_scale,
         cu_seqlens,
         scale,
         T=T,
@@ -396,6 +401,7 @@ class FusedRecurrentFunction(torch.autograd.Function):
         beta: torch.Tensor,
         scale: float,
         initial_state: torch.Tensor,
+        initial_scale: torch.Tensor,
         output_final_state: bool,
         use_qk_l2norm_in_kernel: bool = False,
         cu_seqlens: Optional[torch.LongTensor] = None,
@@ -413,6 +419,7 @@ class FusedRecurrentFunction(torch.autograd.Function):
             beta=beta,
             scale=scale,
             initial_state=initial_state,
+            initial_scale=initial_scale,
             output_final_state=output_final_state,
             cu_seqlens=cu_seqlens,
         )

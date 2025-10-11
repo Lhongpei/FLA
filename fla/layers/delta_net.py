@@ -244,6 +244,7 @@ class DeltaNet(nn.Module):
             beta = beta * 2.
 
         recurrent_state = last_state['recurrent_state'] if last_state is not None else None
+        mode = 'fused_recurrent'
         if mode == 'fused_recurrent':
             o, recurrent_state = fused_recurrent_delta_rule(
                 q=q,

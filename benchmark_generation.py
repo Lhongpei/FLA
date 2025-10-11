@@ -23,8 +23,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generation benchmarking")
     parser.add_argument("--path", type=str, default="fla-hub/delta_net-1.3B-100B")
     parser.add_argument("--data", type=str, default="fla-hub/pg19")
-    parser.add_argument("--length", type=int, default=3)
-    parser.add_argument("--maxlen", type=int, default=3)
+    parser.add_argument("--length", type=int, default=3000)
+    parser.add_argument("--maxlen", type=int, default=3000)
     parser.add_argument("--no-cache", action='store_true')
     parser.add_argument("--temperature", type=float, default=0.5)
     parser.add_argument("--topp", type=float, default=0.2)
@@ -61,7 +61,8 @@ if __name__ == "__main__":
     dataset = load_dataset(args.data, split='train', trust_remote_code=True)
     print(f"{dataset}")
 
-    prompt = dataset[0]['text']
+    # prompt = dataset[0]['text']
+    prompt = "Introduce youself."
     tokens = tokenizer(prompt, return_tensors="pt")
     input_ids = tokens.input_ids.to(device=device)[:, :args.length].contiguous()
     max_length = input_ids.shape[1] + args.maxlen
