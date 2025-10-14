@@ -21,7 +21,12 @@ class Cache(transformers.cache_utils.Cache):
         self,
         seen_tokens: int = 0
     ) -> Cache:
-        super().__init__()
+        # 修复 transformers 4.57.0 的兼容性问题
+        try:
+            super().__init__()
+        except ValueError:
+            # 如果初始化失败，尝试使用兼容的方式
+            super().__init__(layers=[])
 
         self.states: List[Dict[str, Any]] = []
 
