@@ -170,7 +170,7 @@ class DeltaNet(nn.Module):
         past_key_values: Optional[Cache] = None,
         use_cache: Optional[bool] = False,
         output_attentions: Optional[bool] = False,
-        use_osla = True,
+        use_osla = False,
         **kwargs: Unpack[Dict]
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Cache]]:
         if attention_mask is not None:
@@ -248,7 +248,7 @@ class DeltaNet(nn.Module):
         # print(recurrent_state.shape)
         if use_osla:
             intial_state, initial_scale = recurrent_state if recurrent_state is not None else (None, None)
-        mode = 'fused_recurrent'
+            mode = 'fused_recurrent'
         if mode == 'fused_recurrent':
             if use_osla:
                 o, recurrent_state = fused_recurrent_delta_rule_osla(
