@@ -25,6 +25,7 @@ def chunk_delta_rule_fwd(
     initial_scale: torch.Tensor,
     output_final_state: bool,
     cu_seqlens: Optional[torch.LongTensor] = None,
+    epsilon:float = 1e-3,
 ):
     # obtain WY representation. u is actually the new v.
     w, u, A = prepare_wy_repr_fwd(
@@ -33,14 +34,13 @@ def chunk_delta_rule_fwd(
         beta=beta,
         cu_seqlens=cu_seqlens,
     )
-    # k_new, scale_chunk = prepare_scale_chunk_fwd(
-    #     k=k
-    # )
+
     scale_chunk = torch.cumsum(k, dim=-1) + initial_scale[..., None]
-    scale_chunk = 1.0 / torch.clamp_min(scale_chunk, 1e-6)
+    new_k = k / torch.clamp_min(scale_chunk, epsilon)
+    final_scale = scale_chunk[..., -1]
     
     h, v_new, final_state = chunk_gated_delta_rule_fwd_h(
-        k=k,
+        k=new_k,
         w=w,
         u=u,
         g=None,
@@ -58,7 +58,7 @@ def chunk_delta_rule_fwd(
         scale=scale,
         cu_seqlens=cu_seqlens
     )
-    return o, A, final_state
+    return o, A, final_state, final_scale
 
 
 def chunk_delta_rule_bwd(

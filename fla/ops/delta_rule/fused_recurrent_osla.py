@@ -41,6 +41,7 @@ def fused_recurrent_delta_rule_fwd_kernel(
     STORE_FINAL_STATE: tl.constexpr,
     IS_BETA_HEADWISE: tl.constexpr,
     IS_VARLEN: tl.constexpr,
+    epsilon: float = 1e-3,
 ):
     i_v, i_k, i_nh = tl.program_id(0), tl.program_id(1), tl.program_id(2)
     i_n, i_h = i_nh // H, i_nh % H
@@ -67,16 +68,12 @@ def fused_recurrent_delta_rule_fwd_kernel(
     mask_h = mask_k[None, :] & mask_v[:, None]
 
     b_h = tl.zeros([BV, BK], dtype=tl.float32)
+    b_scale = tl.zeros([BK], dtype=tl.float32)
     if USE_INITIAL_STATE:
         p_h0 = h0 + i_nh * K * V + (i_k * BK + tl.arange(0, BK)[None, :]) * V + (i_v * BV + tl.arange(0, BV)[:, None])
         b_h += tl.load(p_h0, mask=mask_h, other=0).to(tl.float32)
-    
-    # p_scale = scale_0 + i_nh * K * V + (i_k * BK + tl.arange(0, BK)[None, :]) * V + (i_v * BV + tl.arange(0, BV)[:, None])
-    # b_scale = tl.load(p_scale, mask=mask_h, other=0).to(tl.float32)
-    
-    p_scale = scale_0 + (bos * H + i_h) * K + i_k * BK + tl.arange(0, BK)
-    b_scale = tl.zeros([BK], dtype=tl.float32)
-    b_scale += tl.load(p_scale, mask=mask_k, other=0).to(tl.float32)
+        p_scale = scale_0 + (bos * H + i_h) * K + i_k * BK + tl.arange(0, BK)
+        b_scale += tl.load(p_scale, mask=mask_k, other=0).to(tl.float32)
     for _ in range(0, T):
         b_k = tl.load(p_k, mask=mask_k, other=0).to(tl.float32)
         b_v = tl.load(p_v, mask=mask_v, other=0).to(tl.float32)
@@ -90,7 +87,7 @@ def fused_recurrent_delta_rule_fwd_kernel(
             b_beta = tl.load(p_beta).to(tl.float32)
         tl.store(p_u, b_v.to(p_v.dtype.element_ty), mask=mask_v)
         b_v *= b_beta
-        b_h += b_k[None, :] * b_v[:, None] / (b_scale[None, :] + 1e-5)
+        b_h += b_k[None, :] * b_v[:, None] / (b_scale[None, :] + epsilon)
         b_o = b_h * b_q[None, :]
         b_o = tl.sum(b_o, axis=1)
         tl.store(p_o, b_o.to(p_o.dtype.element_ty), mask=mask_v)
@@ -121,6 +118,7 @@ def fused_recurrent_delta_rule_bwd_kernel(
     v,
     beta,
     h0,
+    p0,
     dh0,
     dht,
     do,
@@ -173,6 +171,8 @@ def fused_recurrent_delta_rule_bwd_kernel(
     if USE_FINAL_STATE_GRADIENT:
         p_ht = dht + i_nh * K * V + (i_k * BK + tl.arange(0, BK)[:, None]) * V + (i_v * BV + tl.arange(0, BV)[None, :])
         b_dh += tl.load(p_ht, mask=mask_k[:, None] & mask_v[None, :], other=0).to(tl.float32)
+        # p_scale_t = d_scale_t + (bos * H + i_h) * K + i_k * BK + tl.arange(0, BK)
+        # b_dscale += tl.load(p_scale_t, mask=mask_k, other=0).to(tl.float32)
 
     for _ in range(T):
         b_q = tl.load(p_q, mask=mask_k, other=0).to(tl.float32) * scale
@@ -215,7 +215,8 @@ def fused_recurrent_delta_rule_bwd_kernel(
     tl.debug_barrier()
 
     b_h = tl.zeros([BK, BV], dtype=tl.float32)
-
+    b_p = tl.zeros([BK], dtype=tl.float32)
+    
     p_q = q + (bos * H + i_h) * K + i_k * BK + tl.arange(0, BK)
     p_k = k + (bos * H + i_h) * K + i_k * BK + tl.arange(0, BK)
     p_v = v + (bos * H + i_h) * V + i_v * BV + tl.arange(0, BV)
@@ -232,12 +233,11 @@ def fused_recurrent_delta_rule_bwd_kernel(
         mask_h = mask_k[:, None] & mask_v[None, :]
         p_h0 = h0 + i_nh * K * V + (i_k * BK + tl.arange(0, BK)[:, None]) * V + (i_v * BV + tl.arange(0, BV)[None, :])
         b_h += tl.load(p_h0, mask=mask_h, other=0).to(tl.float32)
+        p_p0 = p0 + (bos * H + i_h) * K + i_k * BK + tl.arange(0, BK)
+        b_p += tl.load(p_p0, mask=mask_k, other=0).to(tl.float32)
 
     for _ in range(0, T):
-        b_dk = tl.load(p_dk, mask=mask_k, other=0).to(tl.float32)
-        b_dv = tl.load(p_dv, mask=mask_v, other=0).to(tl.float32)
-        b_dk -= tl.sum(b_dv[None, :] * b_h, axis=1)
-        tl.store(p_dk, b_dk.to(p_dk.dtype.element_ty), mask=mask_k)
+
 
         b_k = tl.load(p_k, mask=mask_k, other=0).to(tl.float32)
         b_v = tl.load(p_v, mask=mask_v, other=0).to(tl.float32)
@@ -247,12 +247,18 @@ def fused_recurrent_delta_rule_bwd_kernel(
         else:
             b_beta = tl.load(p_beta).to(tl.float32)
         b_v *= b_beta
-
+        b_p += b_k * b_k
         b_h += b_k[:, None] * b_v[None, :]
         b_dq = b_h * b_do[None, :]
         d_q = tl.sum(b_dq, axis=1) * scale
         tl.store(p_dq, d_q.to(p_dq.dtype.element_ty), mask=mask_k)
 
+        b_dk = tl.load(p_dk, mask=mask_k, other=0).to(tl.float32)
+        b_dv = tl.load(p_dv, mask=mask_v, other=0).to(tl.float32)
+        b_dk -= tl.sum(b_dv[None, :] * b_h, axis=1)
+        b_dk /= b_p
+        tl.store(p_dk, b_dk.to(p_dk.dtype.element_ty), mask=mask_k)
+        
         p_k += H*K
         p_v += H*V
         p_do += H*V
@@ -316,7 +322,7 @@ def fused_recurrent_delta_rule_fwd(
         num_stages=num_stages,
     )
     o = o.squeeze(0)
-    return o, u, final_state
+    return o, u, final_state, final_scale
 
 
 def fused_recurrent_delta_rule_bwd(
@@ -328,6 +334,7 @@ def fused_recurrent_delta_rule_bwd(
     do: torch.Tensor,
     scale: float,
     initial_state: torch.Tensor,
+    initial_scale: torch.Tensor,
     cu_seqlens: Optional[torch.LongTensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     B, T, H, K, V = *k.shape, v.shape[-1]
@@ -360,6 +367,7 @@ def fused_recurrent_delta_rule_bwd(
         v,
         beta,
         initial_state,
+        initial_scale,
         dh0,
         dht,
         do,
@@ -411,8 +419,8 @@ class FusedRecurrentFunction(torch.autograd.Function):
             k, k_rstd = l2norm_fwd(k)
         else:
             q_rstd, k_rstd = None, None
-
-        o, u, final_state = fused_recurrent_delta_rule_fwd(
+        # initial_scale = torch.zeros_like(k[:, 0, ...], dtype=torch.float32) + 1 # [B, H, K]
+        o, u, final_state, final_scale = fused_recurrent_delta_rule_fwd(
             q=q,
             k=k,
             v=v,
@@ -424,16 +432,16 @@ class FusedRecurrentFunction(torch.autograd.Function):
             cu_seqlens=cu_seqlens,
         )
 
-        ctx.save_for_backward(q, q_rstd, k, k_rstd, u, beta, initial_state)
+        ctx.save_for_backward(q, q_rstd, k, k_rstd, u, beta, initial_state, initial_scale)
         ctx.scale = scale
         ctx.cu_seqlens = cu_seqlens
         ctx.use_qk_l2norm_in_kernel = use_qk_l2norm_in_kernel
-        return o, final_state
+        return o, final_state, final_scale
 
     @staticmethod
     @input_guard
-    def backward(ctx, do, dht):
-        q, q_rstd, k, k_rstd, v, beta, initial_state = ctx.saved_tensors
+    def backward(ctx, do, dht, dpt):
+        q, q_rstd, k, k_rstd, v, beta, initial_state, initial_scale = ctx.saved_tensors
         dq, dk, dv, db, dh0 = fused_recurrent_delta_rule_bwd(
             q=q,
             k=k,
@@ -443,12 +451,13 @@ class FusedRecurrentFunction(torch.autograd.Function):
             do=do,
             scale=ctx.scale,
             initial_state=initial_state,
+            initial_scale=initial_scale,
             cu_seqlens=ctx.cu_seqlens,
         )
         if ctx.use_qk_l2norm_in_kernel:
             dq = l2norm_bwd(q, q_rstd, dq)
             dk = l2norm_bwd(k, k_rstd, dk)
-        return dq.to(q), dk.to(k), dv.to(v), db.to(beta), None, dh0, None, None, None
+        return dq.to(q), dk.to(k), dv.to(v), db.to(beta), None, dh0, None, None, None, None
 
 
 @torch.compiler.disable
@@ -459,6 +468,7 @@ def fused_recurrent_delta_rule(
     beta: torch.Tensor = None,
     scale: float = None,
     initial_state: torch.Tensor = None,
+    initial_scale: torch.Tensor = None,
     output_final_state: bool = False,
     use_qk_l2norm_in_kernel: bool = False,
     cu_seqlens: Optional[torch.LongTensor] = None,
@@ -539,17 +549,18 @@ def fused_recurrent_delta_rule(
         assert scale > 0, "scale must be positive"
     if beta is None:
         beta = torch.ones_like(q[..., 0])
-    print("Beta", beta)
-    o, final_state = FusedRecurrentFunction.apply(
+    # print(initial_state.shape)
+    o, final_state, final_scale = FusedRecurrentFunction.apply(
         q,
         k,
         v,
         beta,
         scale,
         initial_state,
+        initial_scale,
         output_final_state,
         use_qk_l2norm_in_kernel,
         cu_seqlens,
     )
     # print(cu_seqlens)
-    return o, final_state
+    return o, (final_state, final_scale)

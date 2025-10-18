@@ -13,7 +13,7 @@ from torch.nn import functional as F
 
 from fla.layers.utils import get_unpad_data, index_first_axis, pad_input
 from fla.modules import FusedRMSNormGated, RMSNorm, ShortConvolution
-from fla.ops.delta_rule import chunk_delta_rule, fused_recurrent_delta_rule
+from fla.ops.delta_rule import chunk_delta_rule, fused_recurrent_delta_rule, fused_recurrent_delta_rule_osla
 
 if TYPE_CHECKING:
     from transformers.processing_utils import Unpack
@@ -170,6 +170,7 @@ class DeltaNet(nn.Module):
         past_key_values: Optional[Cache] = None,
         use_cache: Optional[bool] = False,
         output_attentions: Optional[bool] = False,
+        use_osla = True,
         **kwargs: Unpack[Dict]
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Cache]]:
         if attention_mask is not None:
@@ -244,18 +245,34 @@ class DeltaNet(nn.Module):
             beta = beta * 2.
 
         recurrent_state = last_state['recurrent_state'] if last_state is not None else None
+        # print(recurrent_state.shape)
+        if use_osla:
+            intial_state, initial_scale = recurrent_state if recurrent_state is not None else (None, None)
         mode = 'fused_recurrent'
         if mode == 'fused_recurrent':
-            o, recurrent_state = fused_recurrent_delta_rule(
-                q=q,
-                k=k,
-                v=v,
-                beta=beta,
-                initial_state=recurrent_state,
-                output_final_state=use_cache,
-                cu_seqlens=cu_seqlens,
-                use_qk_l2norm_in_kernel=True if self.qk_norm == 'l2' else False
-            )
+            if use_osla:
+                o, recurrent_state = fused_recurrent_delta_rule_osla(
+                    q=q,
+                    k=k,
+                    v=v,
+                    beta=beta,
+                    initial_state=intial_state,
+                    initial_scale=initial_scale,
+                    output_final_state=use_cache,
+                    cu_seqlens=cu_seqlens,
+                    use_qk_l2norm_in_kernel=True if self.qk_norm == 'l2' else False
+                )
+            else:
+                o, recurrent_state = fused_recurrent_delta_rule(
+                    q=q,
+                    k=k,
+                    v=v,
+                    beta=beta,
+                    initial_state=recurrent_state,
+                    output_final_state=use_cache,
+                    cu_seqlens=cu_seqlens,
+                    use_qk_l2norm_in_kernel=True if self.qk_norm == 'l2' else False
+                )
         elif mode == 'chunk':
             o, recurrent_state = chunk_delta_rule(
                 q=q,
