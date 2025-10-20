@@ -21,6 +21,7 @@ class DeltaNetConfig(PretrainedConfig):
         conv_size: int = 4,
         use_beta: bool = True,
         use_output_norm: bool = True,
+        use_osla: bool = False,
         num_heads: int = 16,
         qk_norm: str = 'l2',
         qk_activation: str = 'silu',
@@ -53,6 +54,7 @@ class DeltaNetConfig(PretrainedConfig):
         self.conv_size = conv_size
         self.use_beta = use_beta
         self.use_output_norm = use_output_norm
+        self.use_osla = use_osla
         self.num_heads = num_heads
         self.qk_norm = qk_norm
         self.qk_activation = qk_activation
