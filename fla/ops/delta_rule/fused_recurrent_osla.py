@@ -140,6 +140,7 @@ def fused_recurrent_delta_rule_bwd_kernel(
     USE_INITIAL_STATE: tl.constexpr,  # whether to use dh0
     USE_FINAL_STATE_GRADIENT: tl.constexpr,  # whether to use dht
     IS_VARLEN: tl.constexpr,
+    epsilon: float = 1e-3,
 ):
     i_v, i_k, i_nh = tl.program_id(0), tl.program_id(1), tl.program_id(2)
     i_n, i_h = i_nh // H, i_nh % H
@@ -256,7 +257,7 @@ def fused_recurrent_delta_rule_bwd_kernel(
         b_dk = tl.load(p_dk, mask=mask_k, other=0).to(tl.float32)
         b_dv = tl.load(p_dv, mask=mask_v, other=0).to(tl.float32)
         b_dk -= tl.sum(b_dv[None, :] * b_h, axis=1)
-        b_dk /= b_p
+        b_dk /= (b_p + epsilon)
         tl.store(p_dk, b_dk.to(p_dk.dtype.element_ty), mask=mask_k)
         
         p_k += H*K
