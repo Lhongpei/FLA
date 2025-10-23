@@ -18,6 +18,7 @@ dist
 # experimental results
 exp
 results
+outputs
 wandb
 *.csv
 *.png
