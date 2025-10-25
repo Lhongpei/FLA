@@ -257,7 +257,8 @@ def fused_recurrent_delta_rule_bwd_kernel(
         b_dk = tl.load(p_dk, mask=mask_k, other=0).to(tl.float32)
         b_dv = tl.load(p_dv, mask=mask_v, other=0).to(tl.float32)
         b_dk -= tl.sum(b_dv[None, :] * b_h, axis=1)
-        b_dk /= (b_p + epsilon)
+        denom = b_p + epsilon
+        b_dk = tl.where(b_p > 0, b_dk / denom, 0.0)
         tl.store(p_dk, b_dk.to(p_dk.dtype.element_ty), mask=mask_k)
         
         p_k += H*K
