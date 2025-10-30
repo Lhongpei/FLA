@@ -93,7 +93,7 @@ def fused_recurrent_delta_rule_fwd_kernel(
         tl.store(p_u, b_v.to(p_v.dtype.element_ty), mask=mask_v)
         b_scale = 0.9 * b_scale + b_k * b_k * b_beta
         b_v *= b_beta
-        b_h += b_k[None, :] * b_v[:, None] / (b_scale[None, :] + 1.0)
+        b_h += b_k[None, :] * b_v[:, None] / tl.sqrt(b_scale[None, :] + 1.0)
         b_o = b_h * b_q[None, :]
         b_o = tl.sum(b_o, axis=1)
         tl.store(p_o, b_o.to(p_o.dtype.element_ty), mask=mask_v)
@@ -265,7 +265,7 @@ def fused_recurrent_delta_rule_bwd_kernel(
         b_dk = tl.load(p_dk, mask=mask_k, other=0).to(tl.float32)
         b_dv = tl.load(p_dv, mask=mask_v, other=0).to(tl.float32)
         b_dk -= tl.sum(b_dv[None, :] * b_h, axis=1)
-        denom = b_p + 1.0
+        denom = tl.sqrt(b_p + 1.0)
         b_dk /= denom
         tl.store(p_dk, b_dk.to(p_dk.dtype.element_ty), mask=mask_k)
         
