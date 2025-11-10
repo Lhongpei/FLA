@@ -17,7 +17,7 @@ from transformers.utils.deprecation import deprecate_kwarg
 
 from fla.layers.attn import Attention
 from fla.layers.delta_net import DeltaNet
-from fla.models.osla.configuration_delta_net import OSLAConfig
+from fla.models.osla.configuration_osla_delta_net import OSLAConfig
 from fla.models.utils import Cache
 from fla.modules import FusedCrossEntropyLoss, FusedLinearCrossEntropyLoss
 from fla.modules import GatedMLP as DeltaNetMLP
@@ -92,6 +92,7 @@ class OSLABlock(nn.Module):
             past_key_values=past_key_values,
             use_cache=use_cache,
             output_attentions=output_attentions,
+            use_osla=True,
             **kwargs
         )
         if self.config.fuse_norm:
