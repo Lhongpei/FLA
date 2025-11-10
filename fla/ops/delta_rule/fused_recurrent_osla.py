@@ -72,7 +72,7 @@ def fused_recurrent_delta_rule_fwd_kernel(
     if USE_INITIAL_STATE:
         p_h0 = h0 + i_nh * K * V + (i_k * BK + tl.arange(0, BK)[None, :]) * V + (i_v * BV + tl.arange(0, BV)[:, None])
         b_h += tl.load(p_h0, mask=mask_h, other=0).to(tl.float32)
-        p_scale = scale_0 + (bos * H + i_h) * K + i_k * BK + tl.arange(0, BK)
+        p_scale = scale_0 + (i_n * H + i_h) * K + i_k * BK + tl.arange(0, BK)
         b_scale = tl.load(p_scale, mask=mask_k, other=0).to(tl.float32)
     else:
         b_scale = tl.zeros([BK], dtype=tl.float32)
@@ -108,7 +108,7 @@ def fused_recurrent_delta_rule_fwd_kernel(
     if STORE_FINAL_STATE:
         p_ht = ht + i_nh * K * V + (i_k * BK + tl.arange(0, BK)[None, :]) * V + (i_v * BV + tl.arange(0, BV)[:, None])
         tl.store(p_ht, b_h.to(p_ht.dtype.element_ty), mask=mask_h)
-        p_scale_t = scale_t + (bos * H + i_h) * K + i_k * BK + tl.arange(0, BK)
+        p_scale_t = scale_t + (i_n * H + i_h) * K + i_k * BK + tl.arange(0, BK)
         tl.store(p_scale_t, b_scale.to(p_scale_t.dtype.element_ty), mask=mask_k)
 
 
@@ -240,7 +240,7 @@ def fused_recurrent_delta_rule_bwd_kernel(
         mask_h = mask_k[:, None] & mask_v[None, :]
         p_h0 = h0 + i_nh * K * V + (i_k * BK + tl.arange(0, BK)[:, None]) * V + (i_v * BV + tl.arange(0, BV)[None, :])
         b_h += tl.load(p_h0, mask=mask_h, other=0).to(tl.float32)
-        p_p0 = p0 + (bos * H + i_h) * K + i_k * BK + tl.arange(0, BK)
+        p_p0 = p0 + (i_n * H + i_h) * K + i_k * BK + tl.arange(0, BK)
         b_p = tl.load(p_p0, mask=mask_k, other=0).to(tl.float32)
     else:
         b_p = tl.zeros([BK], dtype=tl.float32)
